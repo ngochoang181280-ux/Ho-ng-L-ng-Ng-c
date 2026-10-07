@@ -9,6 +9,22 @@ export interface ParsedQuestionMeta {
 }
 
 /**
+ * Bộ phận của câu hỏi dùng chung (AT/QT/NQ/TTD): mặc định 'COMMON' (mọi bộ phận dùng chung),
+ * nhưng nếu câu hỏi được gán riêng cho một bộ phận (unit = 'A', 'B'...) thì chỉ phòng thi của bộ phận đó mới bốc.
+ */
+function sharedGroupUnit(questionUnit?: string): string {
+  const u = (questionUnit || '').toUpperCase().trim();
+  return u && u !== 'COMMON' ? u : 'COMMON';
+}
+
+/** So khớp bộ phận câu hỏi với bộ phận phòng thi (A tương thích mã cũ CNVH) */
+export function unitMatches(qUnit: string, targetUnit: string): boolean {
+  const q = (qUnit || '').toUpperCase();
+  const t = (targetUnit || '').toUpperCase();
+  return q === t || (t === 'A' && q === 'CNVH');
+}
+
+/**
  * Phân tích mã câu hỏi theo quy tắc:
  * - AT: Kỹ thuật an toàn điện & BHLĐ (Chung các bậc)
  * - NQ: Nội quy lao động (Chung các bậc)
@@ -25,17 +41,17 @@ export function parseQuestionCode(
 
   // 1. AT: An toàn chung cho các bậc
   if (code === 'AT' || code.startsWith('AT.') || code.startsWith('AT-') || code.startsWith('AT_')) {
-    return { groupType: 'AT', unit: 'COMMON', levelNumber: null, rawCode: 'AT' };
+    return { groupType: 'AT', unit: sharedGroupUnit(questionUnit), levelNumber: null, rawCode: 'AT' };
   }
 
   // 2. NQ: Nội quy chung cho các bậc
   if (code === 'NQ' || code.startsWith('NQ.') || code.startsWith('NQ-') || code.startsWith('NQ_')) {
-    return { groupType: 'NQ', unit: 'COMMON', levelNumber: null, rawCode: 'NQ' };
+    return { groupType: 'NQ', unit: sharedGroupUnit(questionUnit), levelNumber: null, rawCode: 'NQ' };
   }
 
   // 3. QT: Quy trình chung cho các bậc
   if (code === 'QT' || code.startsWith('QT.') || code.startsWith('QT-') || code.startsWith('QT_')) {
-    return { groupType: 'QT', unit: 'COMMON', levelNumber: null, rawCode: 'QT' };
+    return { groupType: 'QT', unit: sharedGroupUnit(questionUnit), levelNumber: null, rawCode: 'QT' };
   }
 
   // 4. TTD.X: Thị trường điện / Điều độ theo bậc (X là bậc 1..8)
@@ -49,7 +65,7 @@ export function parseQuestionCode(
     }
     return {
       groupType: 'TTD',
-      unit: 'COMMON',
+      unit: sharedGroupUnit(questionUnit),
       levelNumber: lvl,
       rawCode: lvl ? `TTD.${lvl}` : 'TTD',
     };
@@ -129,6 +145,11 @@ export function filterQuestionsForRoom(questions: Question[], room: ExamRoom) {
   questions.forEach((q) => {
     const meta = parseQuestionCode(q.section, q.level, q.unit);
 
+    // Câu AT/QT/NQ/TTD gán riêng cho bộ phận khác thì không đưa vào phòng này
+    if (meta.groupType !== 'CHUYEN_MON' && meta.unit !== 'COMMON' && !unitMatches(meta.unit, targetUnit)) {
+      return;
+    }
+
     if (meta.groupType === 'AT') {
       atPool.push(q);
     } else if (meta.groupType === 'NQ') {
@@ -144,8 +165,7 @@ export function filterQuestionsForRoom(questions: Question[], room: ExamRoom) {
       // Chuyên môn (AX.n):
       // 1. Phải đúng bộ phận của phòng thi (ví dụ A chỉ lấy A, không lấy B, C, D)
       const qUnit = (meta.unit || q.unit || 'A').toUpperCase();
-      const isMatchingUnit = qUnit === targetUnit || qUnit === 'COMMON' || 
-        (targetUnit === 'A' && (qUnit === 'A' || qUnit === 'CNVH'));
+      const isMatchingUnit = qUnit === 'COMMON' || unitMatches(qUnit, targetUnit);
 
       if (isMatchingUnit) {
         const qLvl = meta.levelNumber;
@@ -383,3 +403,54 @@ export function generateExamForRoom(room: ExamRoom, allQuestions: Question[]): Q
   return selectedQuestions.slice(0, room.totalQuestions);
 }
 
+
+
+/**
+ * Chuẩn hóa mã nhóm / bộ phận / bậc cho câu hỏi nhập từ Word, AI, thủ công
+ * để mọi nguồn nhập đều cho cùng một cấu trúc dữ liệu:
+ *  - AT / QT / NQ : section 'AT'..., level 'COMMON', unit = 'COMMON' hoặc bộ phận được chọn
+ *  - TTD          : section 'TTD.<bậc>', level '<bậc>'
+ *  - Chuyên môn   : section '<Bộ phận><bậc>.<nhóm con>' (VD A5.1), unit '<Bộ phận>', level '<bậc>'
+ */
+export function normalizeImportedMeta(
+  sectionCode: string,
+  sharedUnit: string = 'COMMON'
+): { section: string; unit: string; level: string; subGroup?: string } {
+  const meta = parseQuestionCode(sectionCode);
+  const shared = sharedGroupUnit(sharedUnit);
+  if (meta.groupType === 'AT' || meta.groupType === 'QT' || meta.groupType === 'NQ') {
+    return { section: meta.groupType, unit: shared, level: 'COMMON' };
+  }
+  if (meta.groupType === 'TTD') {
+    return {
+      section: meta.levelNumber ? `TTD.${meta.levelNumber}` : 'TTD',
+      unit: shared,
+      level: meta.levelNumber ? String(meta.levelNumber) : 'COMMON',
+    };
+  }
+  return {
+    section: meta.rawCode,
+    unit: meta.unit,
+    level: meta.levelNumber ? String(meta.levelNumber) : 'COMMON',
+    subGroup: meta.subGroup,
+  };
+}
+
+/** Kiểm tra kho đề có đủ câu cho cấu hình phòng thi hay không (trả về danh sách cảnh báo) */
+export function getRoomShortages(
+  room: ExamRoom,
+  questions: Question[],
+  counts: { at?: number; qt?: number; nq?: number; ttd?: number; ax?: number }
+): string[] {
+  const el = filterQuestionsForRoom(questions, room);
+  const out: string[] = [];
+  const chk = (label: string, need: number | undefined, have: number) => {
+    if ((need || 0) > have) out.push(`${label}: cần ${need} câu, kho chỉ có ${have}`);
+  };
+  chk('An toàn (AT)', counts.at, el.atPool.length);
+  chk('Quy trình (QT)', counts.qt, el.qtPool.length);
+  chk('Nội quy (NQ)', counts.nq, el.nqPool.length);
+  chk('Điều độ (TTD)', counts.ttd, el.ttdPool.length);
+  chk('Chuyên môn (AX)', counts.ax, el.axAllEligiblePool.length);
+  return out;
+}
