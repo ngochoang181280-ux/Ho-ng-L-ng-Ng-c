@@ -1,0 +1,6 @@
+{
+  "name": "SPMO Pro - Hệ Thống Thi Trắc Nghiệm & Quản Lý Phòng Thi",
+  "description": "Nền tảng thi trắc nghiệm trực tuyến Dark Mode hiệu năng cao cho Web & Mobile, quản lý danh sách thí sinh, mã khóa phòng thi bảo mật và tích hợp Google AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
