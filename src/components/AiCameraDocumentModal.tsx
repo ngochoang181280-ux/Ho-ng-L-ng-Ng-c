@@ -1,3 +1,4 @@
+import { normalizeImportedMeta } from '../utils/questionMeta';
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Camera, Upload, Sparkles, X, CheckCircle2, AlertCircle, 
@@ -167,17 +168,37 @@ export const AiCameraDocumentModal: React.FC<AiCameraDocumentModalProps> = ({
       }
 
       if (data.questions && data.questions.length > 0) {
-        const formatted: Question[] = data.questions.map((q: any, i: number) => ({
-          id: `ai-doc-${Date.now()}-${i}`,
-          number: `${i + 1}`,
-          question: q.question,
-          options: q.options || { A: '', B: '', C: '', D: '' },
-          correct: q.correct || 'A',
-          section: q.section || targetSection,
-          level: `A${targetLevel}`,
-          citation: q.citation || selectedFileName || 'Tài liệu / Ảnh chụp',
-          explanation: q.explanation || '',
-        }));
+        // Mã nhóm luôn lấy theo lựa chọn của người dùng (bộ phận + bậc) để câu hỏi vào đúng kho đề
+        const DEPT_CODE_BY_NAME: Record<string, string> = {
+          'Nhà máy điện': 'A',
+          'XSC cơ': 'B',
+          'Trưởng ca': 'C',
+          'XSC điện': 'D',
+        };
+        const deptCode = DEPT_CODE_BY_NAME[targetDepartment] || 'A';
+        const baseSection =
+          targetSection === 'AX'
+            ? `${deptCode}${targetLevel}.1`
+            : targetSection === 'TTD'
+            ? `TTD.${targetLevel}`
+            : targetSection;
+        const meta = normalizeImportedMeta(baseSection, 'COMMON');
+        const stamp = Date.now().toString(36);
+        const formatted: Question[] = data.questions
+          .filter((q: any) => q && q.question && q.options && q.correct)
+          .map((q: any, i: number) => ({
+            id: `ai-doc-${stamp}-${i}`,
+            number: `${i + 1}`,
+            question: q.question,
+            options: q.options,
+            correct: q.correct,
+            section: meta.section,
+            unit: meta.unit,
+            level: meta.level,
+            subGroup: meta.subGroup,
+            citation: q.citation || selectedFileName || 'Tài liệu / Ảnh chụp',
+            explanation: q.explanation || '',
+          }));
 
         setGeneratedQuestions(formatted);
       } else {

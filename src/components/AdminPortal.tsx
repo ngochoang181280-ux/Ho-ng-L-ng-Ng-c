@@ -17,6 +17,7 @@ import {
   getQuestionLevelNumber
 } from '../utils/questionMeta';
 import { WordImportModal } from './WordImportModal';
+import { RoomPoolSummary } from './RoomPoolSummary';
 import { AiCameraDocumentModal } from './AiCameraDocumentModal';
 import { PrintExamModal } from './PrintExamModal';
 import { OfficialProtocolModal } from './OfficialProtocolModal';
@@ -136,6 +137,70 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
     return filterQuestionsForRoom(questions, dummyRoom);
   }, [questions, newRoomUnit, newRoomLevel, newRoomCode, newRoomName]);
+
+  // Số câu kho đề TƯƠNG ỨNG với bộ phận + bậc của phòng đang tạo / sửa
+  const newRoomAvail = useMemo(() => ({
+    at: newRoomEligible.atPool.length,
+    qt: newRoomEligible.qtPool.length,
+    nq: newRoomEligible.nqPool.length,
+    ttd: newRoomEligible.ttdPool.length,
+    ax: newRoomEligible.axAllEligiblePool.length,
+  }), [newRoomEligible]);
+
+  // Thống kê kho đề theo bộ phận (hiển thị ở tab Ngân hàng câu hỏi)
+  const bankStats = useMemo(() => {
+    const rows: Record<string, { at: number; qt: number; nq: number; ttd: number; ax: number }> = {};
+    const bump = (unit: string, k: 'at' | 'qt' | 'nq' | 'ttd' | 'ax') => {
+      if (!rows[unit]) rows[unit] = { at: 0, qt: 0, nq: 0, ttd: 0, ax: 0 };
+      rows[unit][k] += 1;
+    };
+    questions.forEach((q) => {
+      const meta = parseQuestionCode(q.section, q.level, q.unit);
+      const unit = meta.unit === 'CNVH' ? 'A' : meta.unit;
+      const k = meta.groupType === 'AT' ? 'at'
+        : meta.groupType === 'QT' ? 'qt'
+        : meta.groupType === 'NQ' ? 'nq'
+        : meta.groupType === 'TTD' ? 'ttd' : 'ax';
+      bump(unit, k);
+    });
+    return rows;
+  }, [questions]);
+
+  // Tính lại số câu theo bậc (chế độ tự động) khi đổi bộ phận / bậc của phòng
+  const recomputeRoomLevelCounts = (unit: string, levelStr: string, axTotal: number, preset: 'ladder' | 'even' | 'focus_target') => {
+    const dummy: ExamRoom = {
+      id: 'dummy', roomCode: 'TEMP', roomName: 'TEMP', isLocked: false, accessPin: '',
+      unit, level: levelStr, examTimeMinutes: 60, totalQuestions: 50, maxFocusViolations: 3,
+      activeCandidatesCount: 0, status: 'active', createdAt: '',
+    };
+    const el = filterQuestionsForRoom(questions, dummy);
+    const availByLvl: Record<number, number> = {};
+    for (let lv = 1; lv <= el.targetLevel; lv++) availByLvl[lv] = (el.axPoolByLevel[lv] || []).length;
+    const auto = autoDistributeLevelCounts(axTotal, el.targetLevel, availByLvl, preset);
+    const out: Record<string, number> = {};
+    Object.keys(auto).forEach((k) => { out[k] = auto[Number(k)]; });
+    return out;
+  };
+
+  const handleRoomUnitChange = (unit: string) => {
+    setNewRoomUnit(unit);
+    if (newRoomLevelMode === 'auto') {
+      setNewRoomLevelCounts(recomputeRoomLevelCounts(unit, newRoomLevel, newRoomAxCount, newRoomLevelPreset));
+    }
+  };
+
+  const handleRoomLevelChange = (levelStr: string) => {
+    setNewRoomLevel(levelStr);
+    if (newRoomLevelMode === 'auto') {
+      setNewRoomLevelCounts(recomputeRoomLevelCounts(newRoomUnit, levelStr, newRoomAxCount, newRoomLevelPreset));
+    } else {
+      // chế độ tùy chỉnh: bỏ số câu của các bậc cao hơn bậc thi mới
+      const max = parseInt(levelStr, 10) || 5;
+      const kept: Record<string, number> = {};
+      Object.keys(newRoomLevelCounts).forEach((k) => { if (Number(k) <= max) kept[k] = newRoomLevelCounts[k]; });
+      setNewRoomLevelCounts(kept);
+    }
+  };
 
   // Available questions inventory count per group
   const availableCounts = useMemo(() => {
@@ -445,7 +510,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       levelDistribution: {
         mode: newRoomLevelMode,
         preset: newRoomLevelPreset,
-        counts: newRoomLevelCounts,
+        counts: newRoomLevelMode === 'auto'
+          ? recomputeRoomLevelCounts(newRoomUnit, newRoomLevel, newRoomAxCount, newRoomLevelPreset)
+          : newRoomLevelCounts,
       },
       maxFocusViolations: 3,
       activeCandidatesCount: 0,
@@ -463,6 +530,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Open Edit Room Modal
   const handleOpenEditRoom = (room: ExamRoom) => {
     setEditingRoom(room);
+    setShowEditRoomModal(true);
     setNewRoomName(room.roomName);
     setNewRoomCode(room.roomCode);
     setNewRoomPin(room.accessPin || '');
@@ -533,7 +601,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           levelDistribution: {
             mode: newRoomLevelMode,
             preset: newRoomLevelPreset,
-            counts: newRoomLevelCounts,
+            counts: newRoomLevelMode === 'auto'
+              ? recomputeRoomLevelCounts(newRoomUnit, newRoomLevel, newRoomAxCount, newRoomLevelPreset)
+              : newRoomLevelCounts,
           },
           status: (newRoomLock ? 'locked' : 'active') as 'locked' | 'active',
         };
@@ -543,6 +613,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     onUpdateRooms(updated);
     setEditingRoom(null);
+    setShowEditRoomModal(false);
     setImportNotification(`Đã cập nhật cấu hình phòng thi [${editingRoom.roomCode}] thành công!`);
     setTimeout(() => setImportNotification(null), 4000);
   };
@@ -688,10 +759,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     const meta = parseQuestionCode(q.section, q.level, q.unit);
     const qDept = meta.unit;
+    const isSharedUnit = qDept === 'COMMON';
     const matchDept = questionDepartmentFilter === 'ALL' ||
       qDept === questionDepartmentFilter ||
-      (questionDepartmentFilter === 'A' && (qDept === 'A' || qDept === 'CNVH')) ||
-      (meta.groupType === 'AT' || meta.groupType === 'NQ' || meta.groupType === 'QT');
+      (questionDepartmentFilter === 'A' && qDept === 'CNVH') ||
+      // Câu dùng chung (AT/QT/NQ/TTD) cũng nằm trong kho của mọi bộ phận
+      (isSharedUnit && meta.groupType !== 'CHUYEN_MON' && questionDepartmentFilter !== 'COMMON');
 
     const matchLevel = questionLevelFilter === 'ALL' ||
       (questionLevelFilter === 'COMMON' && meta.levelNumber === null) ||
@@ -850,6 +923,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   onClick={() => {
                     generateRandomPin();
                     generateRandomRoomCode();
+                    setNewRoomUnit(departments[0]?.code || 'A');
+                    setNewRoomLevel('5');
+                    setNewRoomLevelMode('auto');
+                    setNewRoomLevelPreset('ladder');
+                    setNewRoomLevelCounts({});
                     setShowCreateRoomModal(true);
                   }}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-cyan-500/20 active:scale-95 transition-all"
@@ -1263,6 +1341,54 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <span>Thêm Thủ Công</span>
                 </button>
               </div>
+            </div>
+
+            {/* Thống kê kho đề theo bộ phận */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 overflow-x-auto">
+              <div className="text-xs font-bold text-slate-300 mb-2 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-cyan-400" />
+                <span>Thống kê kho đề theo bộ phận (số câu hiện có)</span>
+              </div>
+              <table className="w-full text-xs text-center">
+                <thead>
+                  <tr className="text-slate-400">
+                    <th className="text-left py-1 pr-2 font-semibold">Kho</th>
+                    <th className="px-2 font-semibold">AT</th>
+                    <th className="px-2 font-semibold">QT</th>
+                    <th className="px-2 font-semibold">NQ</th>
+                    <th className="px-2 font-semibold">TTD</th>
+                    <th className="px-2 font-semibold">Chuyên môn</th>
+                    <th className="px-2 font-semibold">Tổng</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { code: 'COMMON', label: 'Dùng chung mọi bộ phận' },
+                    ...departments.map((d) => ({ code: d.code, label: `${d.code} - ${d.name}` })),
+                    ...Object.keys(bankStats)
+                      .filter((c) => c !== 'COMMON' && !departments.some((d) => d.code === c))
+                      .map((c) => ({ code: c, label: `Kho ${c} (chưa khai báo bộ phận)` })),
+                  ].map((row) => {
+                    const r = bankStats[row.code] || { at: 0, qt: 0, nq: 0, ttd: 0, ax: 0 };
+                    const total = r.at + r.qt + r.nq + r.ttd + r.ax;
+                    return (
+                      <tr key={row.code} className="border-t border-slate-800 text-slate-200">
+                        <td className="text-left py-1.5 pr-2 font-medium">{row.label}</td>
+                        <td className="font-mono">{r.at}</td>
+                        <td className="font-mono">{r.qt}</td>
+                        <td className="font-mono">{r.nq}</td>
+                        <td className="font-mono">{r.ttd}</td>
+                        <td className={`font-mono ${row.code !== 'COMMON' && r.ax === 0 ? 'text-rose-400 font-bold' : ''}`}>{r.ax}</td>
+                        <td className="font-mono font-bold text-cyan-300">{total}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-slate-500 mt-2">
+                Phòng thi của bộ phận X bốc: câu chuyên môn của kho X (bậc 1 → bậc thi) + câu dùng chung + câu riêng của kho X.
+                Kho bộ phận có chuyên môn = 0 (màu đỏ) sẽ không đủ câu để tạo đề.
+              </p>
             </div>
 
             {/* Filter */}
@@ -2601,8 +2727,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
       {/* Modal: Create Room */}
       {showCreateRoomModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <form onSubmit={handleCreateRoom} className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <form onSubmit={handleCreateRoom} className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-scaleUp my-auto max-h-[92vh] overflow-y-auto">
             <h3 className="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2">
               <Key className="w-5 h-5 text-cyan-400" />
               <span>Tạo Phòng Thi Mới & Mã Khóa</span>
@@ -2657,6 +2783,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="block text-slate-400 font-medium mb-1">Bộ phận / Kho đề:</label>
+                  <select
+                    value={newRoomUnit}
+                    onChange={(e) => handleRoomUnitChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                  >
+                    {departments.map((d) => (
+                      <option key={d.code} value={d.code}>
+                        {d.code} - {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-medium mb-1">Bậc thi:</label>
+                  <select
+                    value={newRoomLevel}
+                    onChange={(e) => handleRoomLevelChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                  >
+                    {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                      <option key={n} value={String(n)}>Bậc {n}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
                   <label className="block text-slate-400 font-medium mb-1">Thời gian (phút):</label>
                   <input
                     type="number"
@@ -2688,7 +2844,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         onChange={(e) => setNewRoomAtCount(Math.max(0, Number(e.target.value)))}
                         className="w-full text-center py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-100 font-mono font-bold"
                       />
-                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {availableCounts.at || 0}</span>
+                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {newRoomAvail.at}</span>
                     </div>
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] font-bold text-teal-400">QT</span>
@@ -2699,7 +2855,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         onChange={(e) => setNewRoomQtCount(Math.max(0, Number(e.target.value)))}
                         className="w-full text-center py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-100 font-mono font-bold"
                       />
-                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {availableCounts.qt || 0}</span>
+                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {newRoomAvail.qt}</span>
                     </div>
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] font-bold text-amber-400">NQ</span>
@@ -2710,7 +2866,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         onChange={(e) => setNewRoomNqCount(Math.max(0, Number(e.target.value)))}
                         className="w-full text-center py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-100 font-mono font-bold"
                       />
-                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {availableCounts.nq || 0}</span>
+                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {newRoomAvail.nq}</span>
                     </div>
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] font-bold text-indigo-400">TTD</span>
@@ -2721,7 +2877,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         onChange={(e) => setNewRoomTtdCount(Math.max(0, Number(e.target.value)))}
                         className="w-full text-center py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-100 font-mono font-bold"
                       />
-                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {availableCounts.ttd || 0}</span>
+                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {newRoomAvail.ttd}</span>
                     </div>
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] font-bold text-purple-400">AX</span>
@@ -2732,7 +2888,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         onChange={(e) => setNewRoomAxCount(Math.max(0, Number(e.target.value)))}
                         className="w-full text-center py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-100 font-mono font-bold"
                       />
-                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {availableCounts.ax || 0}</span>
+                      <span className="text-[9px] text-slate-500 mt-0.5">Kho: {newRoomAvail.ax}</span>
                     </div>
                   </div>
 
@@ -2762,6 +2918,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </div>
                 </div>
               </div>
+
+              <RoomPoolSummary
+                eligible={newRoomEligible}
+                unitName={departments.find((d) => d.code === newRoomUnit)?.name || 'Bộ phận ' + newRoomUnit}
+                counts={{ at: newRoomAtCount, qt: newRoomQtCount, nq: newRoomNqCount, ttd: newRoomTtdCount, ax: newRoomAxCount }}
+              />
 
               <div className="flex items-center gap-2 pt-2">
                 <input
@@ -2862,7 +3024,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <label className="block text-slate-400 font-medium mb-1">Bộ phận / Ban:</label>
                   <select
                     value={newRoomUnit}
-                    onChange={(e) => setNewRoomUnit(e.target.value)}
+                    onChange={(e) => handleRoomUnitChange(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                   >
                     {departments.map((d) => (
@@ -2872,6 +3034,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Bậc thi của phòng:</label>
+                <select
+                  value={newRoomLevel}
+                  onChange={(e) => handleRoomLevelChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                >
+                  {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                    <option key={n} value={String(n)}>Bậc {n}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Group Counts Section in Edit Modal */}
@@ -2896,7 +3071,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onChange={(e) => setNewRoomAtCount(Math.max(0, Number(e.target.value)))}
                       className="w-full text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono font-bold"
                     />
-                    <span className="text-[9px] text-slate-500 mt-1">Kho: {availableCounts.at || 0}</span>
+                    <span className="text-[9px] text-slate-500 mt-1">Kho: {newRoomAvail.at}</span>
                   </div>
                   <div className="flex flex-col items-center">
                     <span className="text-[11px] font-bold text-teal-400">QT</span>
@@ -2907,7 +3082,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onChange={(e) => setNewRoomQtCount(Math.max(0, Number(e.target.value)))}
                       className="w-full text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono font-bold"
                     />
-                    <span className="text-[9px] text-slate-500 mt-1">Kho: {availableCounts.qt || 0}</span>
+                    <span className="text-[9px] text-slate-500 mt-1">Kho: {newRoomAvail.qt}</span>
                   </div>
                   <div className="flex flex-col items-center">
                     <span className="text-[11px] font-bold text-amber-400">NQ</span>
@@ -2918,7 +3093,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onChange={(e) => setNewRoomNqCount(Math.max(0, Number(e.target.value)))}
                       className="w-full text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono font-bold"
                     />
-                    <span className="text-[9px] text-slate-500 mt-1">Kho: {availableCounts.nq || 0}</span>
+                    <span className="text-[9px] text-slate-500 mt-1">Kho: {newRoomAvail.nq}</span>
                   </div>
                   <div className="flex flex-col items-center">
                     <span className="text-[11px] font-bold text-indigo-400">TTD</span>
@@ -2929,7 +3104,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onChange={(e) => setNewRoomTtdCount(Math.max(0, Number(e.target.value)))}
                       className="w-full text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono font-bold"
                     />
-                    <span className="text-[9px] text-slate-500 mt-1">Kho: {availableCounts.ttd || 0}</span>
+                    <span className="text-[9px] text-slate-500 mt-1">Kho: {newRoomAvail.ttd}</span>
                   </div>
                   <div className="flex flex-col items-center">
                     <span className="text-[11px] font-bold text-purple-400">AX</span>
@@ -2940,7 +3115,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onChange={(e) => setNewRoomAxCount(Math.max(0, Number(e.target.value)))}
                       className="w-full text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono font-bold"
                     />
-                    <span className="text-[9px] text-slate-500 mt-1">Kho: {availableCounts.ax || 0}</span>
+                    <span className="text-[9px] text-slate-500 mt-1">Kho: {newRoomAvail.ax}</span>
                   </div>
                 </div>
 
@@ -2976,6 +3151,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </button>
                 </div>
               </div>
+
+              <RoomPoolSummary
+                eligible={newRoomEligible}
+                unitName={departments.find((d) => d.code === newRoomUnit)?.name || 'Bộ phận ' + newRoomUnit}
+                counts={{ at: newRoomAtCount, qt: newRoomQtCount, nq: newRoomNqCount, ttd: newRoomTtdCount, ax: newRoomAxCount }}
+              />
 
               <div className="flex items-center gap-2 pt-2">
                 <input
@@ -3346,6 +3527,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         isOpen={showWordImportModal}
         onClose={() => setShowWordImportModal(false)}
         onImportQuestions={handleImportWordQuestions}
+        departments={departments}
+        existingQuestions={questions}
       />
 
       {/* Modal: AI Camera & Document Question Generator */}
