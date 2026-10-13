@@ -26,7 +26,7 @@ export const AiCameraDocumentModal: React.FC<AiCameraDocumentModalProps> = ({
   // Department and Level target
   const [targetDepartment, setTargetDepartment] = useState('Nhà máy điện');
   const [targetLevel, setTargetLevel] = useState('5');
-  const [targetSection, setTargetSection] = useState('AT');
+  const [targetSection, setTargetSection] = useState('QT');
   const [customPrompt, setCustomPrompt] = useState('');
 
   // Camera stream state
@@ -140,7 +140,7 @@ export const AiCameraDocumentModal: React.FC<AiCameraDocumentModalProps> = ({
   // Send to Google AI backend
   const handleGenerateQuestions = async () => {
     if (!capturedImageBase64 && !documentText.trim()) {
-      alert('Vui lòng chụp ảnh hoặc tải file tài liệu trước.');
+      setAiError('Vui lòng chụp ảnh hoặc tải file tài liệu trước.');
       return;
     }
 

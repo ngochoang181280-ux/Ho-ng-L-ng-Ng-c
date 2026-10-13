@@ -3,9 +3,14 @@ import {
   Trophy, CheckCircle, XCircle, Clock, AlertCircle, 
   RotateCcw, Sparkles, Printer, ChevronDown, ChevronUp,
   BookOpen, ShieldCheck, Share2, HelpCircle, Layers, Award,
-  CheckCircle2, Filter
+  CheckCircle2, Filter, FileDown, Download, Check, Database
 } from 'lucide-react';
 import { ExamAttempt, Question } from '../types/exam';
+import { isTtdQuestion, getQuestionBankInfo } from '../utils/questionMeta';
+import { getQuestionGroupKey } from '../data/mockData';
+import { getSavedOrgConfig } from '../utils/organizationStorage';
+import { downloadExamResultDoc } from '../utils/examResultExport';
+import { CertificateModal } from './CertificateModal';
 
 interface ExamResultViewProps {
   attempt: ExamAttempt;
@@ -22,6 +27,24 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [aiExplanations, setAiExplanations] = useState<Record<number, string>>({});
   const [loadingAi, setLoadingAi] = useState<Record<number, boolean>>({});
+  const [isExportingWord, setIsExportingWord] = useState(false);
+  const [showOfficialReview, setShowOfficialReview] = useState(false);
+  const [showCertificateModal, setShowCertificateModal] = useState(false);
+
+  const orgConfig = useMemo(() => getSavedOrgConfig(), []);
+
+  const handleExportWordDoc = () => {
+    setIsExportingWord(true);
+    try {
+      const cleanCandidateName = (attempt.candidateName || 'ThiSinh').replace(/\s+/g, '_');
+      const filename = `Bang_DapAn_TrichDan_${cleanCandidateName}_${attempt.examCode || 'De'}_Bac${attempt.level}.doc`;
+      downloadExamResultDoc(filename, attempt, orgConfig);
+    } catch (err) {
+      console.error('Lỗi xuất file Word', err);
+    } finally {
+      setTimeout(() => setIsExportingWord(false), 1200);
+    }
+  };
 
   // Compute or read group breakdown (AT, QT, NQ, TTD, AX)
   const groupStats = useMemo(() => {
@@ -38,12 +61,12 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
     };
 
     attempt.questions.forEach((q, idx) => {
-      const sec = (q.section || '').toUpperCase();
       let grpKey = 'ax';
-      if (sec === 'AT' || sec.startsWith('AT')) grpKey = 'at';
-      else if (sec === 'QT' || sec.startsWith('QT')) grpKey = 'qt';
-      else if (sec === 'NQ' || sec.startsWith('NQ')) grpKey = 'nq';
-      else if (sec.startsWith('TTD') || sec.startsWith('DD')) grpKey = 'ttd';
+      if (isTtdQuestion(q)) {
+        grpKey = 'ttd';
+      } else {
+        grpKey = getQuestionGroupKey(q);
+      }
 
       if (!stats[grpKey]) stats[grpKey] = { total: 0, correct: 0, percent: 0 };
       stats[grpKey].total++;
@@ -122,16 +145,14 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 py-6 px-3 sm:px-6">
+    <div className="min-h-screen bg-slate-100 text-slate-900 py-6 px-3 sm:px-6">
       <div className="max-w-4xl mx-auto flex flex-col gap-6">
         
         {/* Top Summary Banner */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden backdrop-blur-xl">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pb-6 border-b border-slate-800 text-center sm:text-left">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pb-6 border-b border-slate-200 text-center sm:text-left">
             <div className="flex items-center gap-4">
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl ${
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg ${
                 isPassed 
                   ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/20' 
                   : 'bg-gradient-to-br from-amber-500 to-rose-600 text-white shadow-rose-500/20'
@@ -139,14 +160,20 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
                 <Trophy className="w-8 h-8" />
               </div>
               <div>
-                <span className="text-xs uppercase font-bold tracking-wider text-cyan-400">
-                  {attempt.mode === 'official' ? 'Bài Thi Sát Hạch Chính Thức' : 'Bài Thi Luyện Ôn Tập'}
-                </span>
-                <h1 className="text-xl sm:text-2xl font-black text-slate-100">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-[11px] uppercase font-bold tracking-wider text-sky-700">
+                    {orgConfig.companyName}
+                  </span>
+                  <span className="text-slate-400 text-xs">&bull;</span>
+                  <span className="text-xs text-slate-600 font-medium">
+                    {attempt.mode === 'official' ? 'Sát Hạch Chính Thức' : 'Bài Luyện Ôn Tập'}
+                  </span>
+                </div>
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900">
                   Kết Quả: {attempt.candidateName}
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-400">
-                  {attempt.unitName} • Bậc {attempt.level} • Phòng: <span className="text-cyan-300 font-semibold">{attempt.roomCode}</span> • Mã đề: <span className="text-slate-200 font-mono font-bold">{attempt.examCode}</span>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  {attempt.unitName} • Bậc {attempt.level} • Phòng: <span className="text-sky-700 font-bold">{attempt.roomCode}</span> • Mã đề: <span className="text-slate-800 font-mono font-bold">{attempt.examCode}</span>
                 </p>
               </div>
             </div>
@@ -155,7 +182,7 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
             <div className="flex flex-col items-center sm:items-end">
               <div className="flex items-baseline gap-1">
                 <span className={`text-4xl sm:text-5xl font-black ${
-                  isPassed ? 'text-emerald-400' : 'text-rose-400'
+                  isPassed ? 'text-emerald-600' : 'text-rose-600'
                 }`}>
                   {attempt.score}
                 </span>
@@ -163,21 +190,21 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
               </div>
 
               <div className="mt-2 text-right">
-                <span className={`inline-block px-3.5 py-1 rounded-xl text-xs font-black uppercase tracking-wider border shadow-md ${
+                <span className={`inline-block px-3.5 py-1 rounded-xl text-xs font-black uppercase tracking-wider border shadow-sm ${
                   isPassed 
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
-                    : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+                    : 'bg-rose-50 text-rose-800 border-rose-300'
                 }`}>
                   {isPassed ? '✓ ĐẠT TIÊU CHUẨN SÁT HẠCH' : '✗ CHƯA ĐẠT TIÊU CHUẨN'}
                 </span>
 
                 {!safetyPassed && (
-                  <p className="text-[11px] text-rose-400 font-semibold mt-1">
+                  <p className="text-[11px] text-rose-600 font-semibold mt-1">
                     * Không đạt điều kiện sàn An toàn điện (&ge; 80%)
                   </p>
                 )}
                 {safetyPassed && attempt.percent < 70 && (
-                  <p className="text-[11px] text-amber-400 font-semibold mt-1">
+                  <p className="text-[11px] text-amber-700 font-semibold mt-1">
                     * Điểm tổng chưa đạt mức tối thiểu 70% (7.0 điểm)
                   </p>
                 )}
@@ -187,38 +214,60 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
 
           {/* Core Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6">
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 text-center">
-              <span className="text-xs text-slate-400 font-medium">Số câu đúng</span>
-              <p className="text-xl font-bold text-emerald-400 mt-1 flex items-center justify-center gap-1.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-center">
+              <span className="text-xs text-slate-500 font-medium">Số câu đúng</span>
+              <p className="text-xl font-bold text-emerald-600 mt-1 flex items-center justify-center gap-1.5">
                 <CheckCircle className="w-5 h-5" />
                 <span>{attempt.correct}/{attempt.total}</span>
               </p>
             </div>
 
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 text-center">
-              <span className="text-xs text-slate-400 font-medium">Số câu sai</span>
-              <p className="text-xl font-bold text-rose-400 mt-1 flex items-center justify-center gap-1.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-center">
+              <span className="text-xs text-slate-500 font-medium">Số câu sai</span>
+              <p className="text-xl font-bold text-rose-600 mt-1 flex items-center justify-center gap-1.5">
                 <XCircle className="w-5 h-5" />
                 <span>{attempt.wrong}</span>
               </p>
             </div>
 
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 text-center">
-              <span className="text-xs text-slate-400 font-medium">Thời gian làm bài</span>
-              <p className="text-xl font-bold text-cyan-300 mt-1 flex items-center justify-center gap-1.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-center">
+              <span className="text-xs text-slate-500 font-medium">Thời gian làm bài</span>
+              <p className="text-xl font-bold text-sky-700 mt-1 flex items-center justify-center gap-1.5">
                 <Clock className="w-5 h-5" />
                 <span>{Math.floor(attempt.elapsedSeconds / 60)}p {attempt.elapsedSeconds % 60}s</span>
               </p>
             </div>
 
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 text-center">
-              <span className="text-xs text-slate-400 font-medium">Rời màn hình</span>
-              <p className="text-xl font-bold text-slate-300 mt-1 flex items-center justify-center gap-1.5">
-                <ShieldCheck className="w-5 h-5 text-cyan-400" />
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-center">
+              <span className="text-xs text-slate-500 font-medium">Rời màn hình</span>
+              <p className="text-xl font-bold text-slate-700 mt-1 flex items-center justify-center gap-1.5">
+                <ShieldCheck className="w-5 h-5 text-sky-600" />
                 <span>{attempt.focusViolations} lần</span>
               </p>
             </div>
           </div>
+
+          {/* Matrix Shortage Note in Results */}
+          {attempt.matrixWarnings && attempt.matrixWarnings.length > 0 && (
+            <div className="mt-4 p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1 text-xs">
+                  <p className="font-bold text-amber-900">
+                    LƯU Ý VỀ MA TRẬN ĐỀ THI: Đã ra đề bỏ qua các phần thiếu trong kho câu hỏi
+                  </p>
+                  <p className="text-amber-800 leading-relaxed">
+                    Đề thi thực tế có <strong className="text-amber-950 font-bold">{attempt.total} câu</strong> (cấu hình ma trận yêu cầu {attempt.matrixTargetTotal || attempt.total} câu). Hệ thống đã bỏ qua các phần thiếu và không lấy câu hỏi từ nhóm khác thay thế vào:
+                  </p>
+                  <ul className="list-disc list-inside space-y-0.5 text-amber-200/80 pt-1">
+                    {attempt.matrixWarnings.slice(1).map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 5-GROUP PERFORMANCE BREAKDOWN (AT, QT, NQ, TTD, AX) */}
           <div className="mt-6 pt-5 border-t border-slate-800/80">
@@ -351,85 +400,225 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
               </button>
             </div>
 
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold border border-slate-700 transition-colors"
-            >
-              <Printer className="w-4 h-4" />
-              <span>In phiếu điểm & Biên bản</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {isPassed && (
+                <button
+                  onClick={() => setShowCertificateModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs sm:text-sm font-bold shadow-md shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                  title="In hoặc tải Giấy Chứng Nhận Đạt Sát Hạch chính thức"
+                >
+                  <Award className="w-4 h-4 text-amber-100" />
+                  <span>🎓 Cấp Giấy Chứng Nhận</span>
+                </button>
+              )}
+
+              <button
+                onClick={handleExportWordDoc}
+                disabled={isExportingWord}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+                title="Xuất file Word (.doc) chứa đáp án thí sinh, đáp án đúng và phần trích dẫn căn cứ"
+              >
+                <FileDown className="w-4 h-4 text-cyan-200" />
+                <span>{isExportingWord ? 'Đang xuất Word...' : '📄 Xuất File Word (.doc)'}</span>
+              </button>
+
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm font-semibold border border-slate-700 transition-colors cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>In phiếu điểm & Biên bản</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* REVIEW FILTER CONTROLS & QUESTION LIST */}
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-1">
-            <div>
-              <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-cyan-400" />
-                <span>Xem Lại Đáp Án & Trích Dẫn Quy Trình Kỹ Thuật</span>
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Mỗi câu hỏi đều hiển thị rõ phương án đúng/sai kèm căn cứ quy trình pháp lý để thí sinh ôn tập.
-              </p>
+        {/* SECTION: THI THẬT (OFFICIAL) VS LUYỆN THI (TRAINING)
+            - KHI THI THẬT: Chỉ hiện kết quả, không hiển thị lại phần đã thi và trích dẫn trên giao diện, 
+              nhưng cung cấp nút xuất file Word (.doc) chứa đáp án của thí sinh, đáp án đúng và phần trích dẫn.
+            - KHI LUYỆN THI: Hiển thị đầy đủ danh sách câu hỏi, đáp án đúng và phần trích dẫn để thí sinh ôn tập. */}
+        {attempt.mode === 'official' && (
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0 text-amber-400 shadow-lg">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-100">
+                    Quy Chế Bảo Mật Đề Thi Sát Hạch Chính Thức (EVN SPMO)
+                  </h3>
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                    Chế độ Thi Thật
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  Theo Quy chế thi sát hạch nâng bậc kỹ thuật, màn hình thí sinh <strong>chỉ công bố kết quả và điểm số tổng hợp</strong>, không hiển thị lại toàn bộ đề thi và phần trích dẫn trực tiếp trên màn hình nhằm bảo mật ngân hàng đề thi chung.
+                </p>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Hội đồng sát hạch và thí sinh có thể tải về file Word (.doc) chính thức chứa đầy đủ <strong>bảng đối chiếu đáp án của thí sinh, đáp án chính xác của đề thi và toàn bộ phần trích dẫn quy chuẩn có sẵn trong đề</strong> để lưu trữ hồ sơ đánh giá.
+                </p>
+              </div>
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setFilterType('ALL')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  filterType === 'ALL'
-                    ? 'bg-slate-800 text-cyan-300 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Tất cả ({attempt.total})
-              </button>
+            {/* Card Xuất File Word Nổi Bật Cho Thi Thật */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-blue-950/40 via-indigo-950/30 to-slate-900 border border-blue-500/40 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <FileDown className="w-5 h-5 text-cyan-400" />
+                  <h4 className="text-sm sm:text-base font-bold text-slate-100">
+                    Bảng Đối Chiếu Đáp Án Thí Sinh, Đáp Án Chuẩn &amp; Phần Trích Dẫn Chi Tiết
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Tải ngay file Word (.doc) chuẩn văn bản EVN gồm: Tổng kết điểm số, Bảng ma trận đối chiếu nhanh đáp án, Chi tiết từng câu hỏi, và <strong>Căn cứ trích dẫn quy trình kỹ thuật</strong>.
+                </p>
+              </div>
 
               <button
-                type="button"
-                onClick={() => setFilterType('WRONG')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  filterType === 'WRONG'
-                    ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30'
-                    : 'text-slate-400 hover:text-rose-300'
-                }`}
+                onClick={handleExportWordDoc}
+                disabled={isExportingWord}
+                className="w-full md:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-sm shadow-xl shadow-blue-600/30 active:scale-95 transition-all flex items-center justify-center gap-2.5 shrink-0 cursor-pointer"
               >
-                Câu sai ({attempt.wrong})
+                <FileDown className="w-5 h-5 text-cyan-200" />
+                <span>{isExportingWord ? 'Đang tạo file Word...' : '📥 Xuất File Word Chi Tiết Đáp Án & Trích Dẫn'}</span>
               </button>
+            </div>
 
+            {/* Thông Tin Tóm Tắt Biên Bản */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+                <span className="text-slate-400 text-[11px] block">Thí sinh sát hạch:</span>
+                <p className="font-bold text-slate-100 uppercase mt-0.5 truncate">{attempt.candidateName}</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+                <span className="text-slate-400 text-[11px] block">Bộ phận & Bậc:</span>
+                <p className="font-bold text-slate-100 mt-0.5 truncate">{attempt.unitName} • Bậc {attempt.level}</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+                <span className="text-slate-400 text-[11px] block">Mã đề & Phòng thi:</span>
+                <p className="font-bold text-cyan-300 font-mono mt-0.5 truncate">{attempt.examCode} ({attempt.roomCode})</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+                <span className="text-slate-400 text-[11px] block">Kết quả công nhận:</span>
+                <p className={`font-black mt-0.5 ${isPassed ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {isPassed ? '✓ ĐẠT SÁT HẠCH' : '✗ CHƯA ĐẠT'}
+                </p>
+              </div>
+            </div>
+
+            {/* Nút Xem Lại Chi Tiết Trực Tiếp Trên Màn Hình */}
+            <div className="pt-2 flex justify-center">
               <button
                 type="button"
-                onClick={() => setFilterType('CORRECT')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  filterType === 'CORRECT'
-                    ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30'
-                    : 'text-slate-400 hover:text-emerald-300'
-                }`}
+                onClick={() => setShowOfficialReview(!showOfficialReview)}
+                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-bold text-xs sm:text-sm border border-cyan-500/30 flex items-center gap-2 cursor-pointer transition-all shadow-md"
               >
-                Câu đúng ({attempt.correct})
+                <BookOpen className="w-4 h-4 text-cyan-400" />
+                <span>
+                  {showOfficialReview
+                    ? '▲ Thu Gọn Danh Sách Câu Hỏi'
+                    : '▼ Xem Lại Chi Tiết Toàn Bộ Câu Hỏi, Đáp Án Chuẩn & Phần Giải Thích Trích Dẫn'}
+                </span>
               </button>
-
-              {attempt.unanswered > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setFilterType('UNANSWERED')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
-                    filterType === 'UNANSWERED'
-                      ? 'bg-slate-800 text-amber-300 font-bold'
-                      : 'text-slate-400 hover:text-amber-300'
-                  }`}
-                >
-                  Chưa làm ({attempt.unanswered})
-                </button>
-              )}
             </div>
           </div>
+        )}
 
-          {/* Question List */}
-          <div className="flex flex-col gap-3">
+        {/* CHẾ ĐỘ LUYỆN THI HOẶC BẬT XEM LẠI: HIỂN THỊ ĐẦY ĐỦ CÂU HỎI, ĐÁP ÁN ĐÚNG VÀ PHẦN TRÍCH DẪN */}
+        {(attempt.mode === 'training' || showOfficialReview) && (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-1">
+              <div>
+                <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-cyan-400" />
+                  <span>Xem Lại Đáp Án &amp; Phần Giải Thích Trích Dẫn ({attempt.mode === 'training' ? 'Ôn Luyện' : 'Sát Hạch'})</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Mỗi câu hỏi đều hiển thị rõ phương án đúng/sai kèm <strong>phần giải thích trích dẫn có sẵn trong đề</strong> để đối chiếu và ôn tập.
+                </p>
+              </div>
+
+              {/* Filter Tabs */}
+              <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setFilterType('ALL')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    filterType === 'ALL'
+                      ? 'bg-slate-800 text-cyan-300 font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Tất cả ({attempt.total})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterType('WRONG')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    filterType === 'WRONG'
+                      ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30'
+                      : 'text-slate-400 hover:text-rose-300'
+                  }`}
+                >
+                  Câu sai ({attempt.wrong})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterType('CORRECT')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    filterType === 'CORRECT'
+                      ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30'
+                      : 'text-slate-400 hover:text-emerald-300'
+                  }`}
+                >
+                  Câu đúng ({attempt.correct})
+                </button>
+
+                {attempt.unanswered > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterType('UNANSWERED')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      filterType === 'UNANSWERED'
+                        ? 'bg-slate-800 text-amber-300 font-bold'
+                        : 'text-slate-400 hover:text-amber-300'
+                    }`}
+                  >
+                    Chưa làm ({attempt.unanswered})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Banner Luyện Thi & Nút Xuất Word */}
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-200 text-xs sm:text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-start sm:items-center gap-3">
+                <span className="text-xl shrink-0">📖</span>
+                <div>
+                  <span className="font-bold text-cyan-100 block sm:inline mr-2">
+                    Chế độ Luyện Thi (Ôn Tập):
+                  </span>
+                  <span className="text-slate-300 text-xs">
+                    Hệ thống tự động hiển thị đầy đủ <strong>Đáp án đúng</strong> và <strong>Phần giải thích trích dẫn có sẵn trong đề</strong> dưới mỗi câu hỏi để bạn đối chiếu và củng cố kiến thức.
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={handleExportWordDoc}
+                disabled={isExportingWord}
+                className="px-3.5 py-1.5 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-500/40 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>Xuất file Word</span>
+              </button>
+            </div>
+
+            {/* Question List */}
+            <div className="flex flex-col gap-3">
             {filteredQuestions.length === 0 ? (
               <div className="p-8 text-center bg-slate-900/60 border border-slate-800 rounded-2xl text-slate-400 text-sm">
                 Không có câu hỏi nào trong mục này.
@@ -473,9 +662,22 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
                           </h3>
 
                           <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
-                            <span className="px-2 py-0.5 rounded-md bg-slate-800 text-cyan-300 font-mono font-bold border border-slate-700">
-                              {q.section}
-                            </span>
+                            {(() => {
+                              const bankInfo = getQuestionBankInfo(q);
+                              return (
+                                <>
+                                  <span className={`px-2.5 py-0.5 rounded-md font-bold text-xs border flex items-center gap-1 ${bankInfo.badgeBg} ${bankInfo.badgeText} ${bankInfo.badgeBorder}`}>
+                                    <Database className="w-3 h-3" />
+                                    <span>{bankInfo.fullLabel}</span>
+                                  </span>
+                                  {q.section && (
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono font-bold border border-slate-300">
+                                      Mã: {q.section}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
 
                             <span className="text-slate-400">
                               Bạn đã chọn:{' '}
@@ -554,39 +756,53 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
                       })}
                     </div>
 
-                    {/* TRÍCH DẪN ĐÁP ÁN ĐÚNG & CĂN CỨ QUY TRÌNH KỸ THUẬT (ALWAYS SHOWN) */}
-                    <div className="mt-3.5 pt-3 border-t border-slate-800/80 space-y-2">
-                      {/* Citation */}
-                      {q.citation ? (
-                        <div className="p-3 rounded-xl bg-blue-950/30 border border-blue-500/30 text-blue-200 text-xs leading-relaxed flex items-start gap-2.5">
-                          <span className="text-base shrink-0">📌</span>
-                          <div>
-                            <strong className="text-blue-100 font-bold block mb-0.5">
-                              Căn cứ quy trình / Quy chuẩn kỹ thuật:
-                            </strong>
-                            <span className="text-slate-200">{q.citation}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-2.5 rounded-xl bg-slate-950/50 border border-slate-800 text-slate-400 text-xs flex items-center gap-2">
-                          <span>📌</span>
-                          <span>Căn cứ quy chuẩn kỹ thuật an toàn điện & Quy trình vận hành SPMO.</span>
-                        </div>
-                      )}
+                    {/* PHẦN GIẢI THÍCH TRÍCH DẪN ĐÁP ÁN (THEO ĐÚNG MẪU NHƯ TRONG FILE WORD / HÌNH ẢNH) */}
+                    {(attempt.mode === 'training' || showOfficialReview) && (() => {
+                      const rawCitation = (q.citation || '').trim();
+                      const rawExplanation = (q.explanation || '').trim();
+                      // Loại bỏ các câu chữ quy chuẩn mặc định cũ nếu có
+                      const isGeneric =
+                        rawCitation.includes('Quy chuẩn Kỹ thuật Nghề nghiệp & Tiêu chuẩn Vận hành SPMO') ||
+                        rawCitation === 'Quy chuẩn ngành điện' ||
+                        rawCitation.includes('Căn cứ Quy chuẩn kỹ thuật an toàn điện & Quy trình vận hành SPMO');
+                      const validCitation = isGeneric ? '' : rawCitation;
+                      const combinedExplain = [validCitation, rawExplanation]
+                        .filter(Boolean)
+                        .filter((v, i, a) => a.indexOf(v) === i)
+                        .join(' - ');
 
-                      {/* Explanation */}
-                      {q.explanation && (
-                        <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 text-xs leading-relaxed flex items-start gap-2.5">
-                          <span className="text-base shrink-0">💡</span>
-                          <div>
-                            <strong className="text-amber-300 font-bold block mb-0.5">
-                              Giải thích chuyên môn & kiến thức trọng tâm:
-                            </strong>
-                            <span className="text-slate-300">{q.explanation}</span>
+                      return (
+                        <div className="mt-3.5 pt-3 border-t border-slate-800/80">
+                          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/90 border border-cyan-500/35 text-xs sm:text-sm leading-relaxed font-sans shadow-lg">
+                            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                              <span className="text-cyan-400 font-bold font-mono text-base leading-none">➜</span>
+                              <strong className="text-emerald-400 font-extrabold text-sm sm:text-base">
+                                Đáp án đúng: {q.correct}
+                              </strong>
+                              <span className="text-slate-500 font-light mx-1">|</span>
+                              <span className="text-cyan-300 font-bold">
+                                Giải thích trích dẫn:
+                              </span>
+                            </div>
+
+                            <div className="pl-5 text-slate-200">
+                              {combinedExplain ? (
+                                <div className="text-amber-100 font-medium leading-relaxed bg-cyan-950/30 p-2.5 rounded-xl border border-cyan-500/20 italic">
+                                  {combinedExplain}
+                                </div>
+                              ) : (
+                                <div className="text-slate-400 italic text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                                  <span>(Câu hỏi này trong đề chưa kèm phần giải thích trích dẫn)</span>
+                                  <span className="text-[11px] text-cyan-400 not-italic font-normal">
+                                    💡 Bạn có thể nạp lại file Word để cập nhật phần giải thích trích dẫn
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
 
                     {/* AI Explanation Drawer (If toggled) */}
                     {isExpanded && (
@@ -614,7 +830,79 @@ export const ExamResultView: React.FC<ExamResultViewProps> = ({
             )}
           </div>
         </div>
+        )}
+
+        {/* Printable Official Result Certificate / Slip - Visible ONLY when printing */}
+        <div className="hidden print:block bg-white text-slate-900 p-8 font-serif text-xs leading-relaxed">
+          <div className="flex justify-between items-start gap-4 pb-3 border-b-2 border-slate-900">
+            <div className="text-center font-bold text-[11px] uppercase leading-tight w-[48%]">
+              <p>{orgConfig.parentOrg}</p>
+              <p className="font-extrabold text-xs mt-0.5">{orgConfig.companyName}</p>
+              <p className="text-[10px] font-normal italic normal-case text-slate-700 mt-0.5">
+                {orgConfig.documentNumber || 'Số: ..... /KQSH'}
+              </p>
+            </div>
+            <div className="text-center font-bold text-[11px] uppercase leading-tight w-[48%]">
+              <p>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</p>
+              <p className="font-normal italic normal-case text-[10.5px]">Độc lập - Tự do - Hạnh phúc</p>
+              <p className="text-[9px] text-slate-500">-------o0o-------</p>
+            </div>
+          </div>
+
+          <div className="text-right italic text-[11px] text-slate-600 mt-2 mb-4">
+            {orgConfig.locationDate || `Hà Nội, ngày ${new Date().getDate()} tháng ${new Date().getMonth() + 1} năm ${new Date().getFullYear()}`}
+          </div>
+
+          <div className="text-center my-4 font-sans">
+            <h2 className="text-base font-black uppercase tracking-wide">
+              PHIẾU XÁC NHẬN KẾT QUẢ SÁT HẠCH NGHỀ TRỰC TUYẾN
+            </h2>
+            <p className="text-xs font-semibold mt-1">
+              Họ và tên thí sinh: <strong className="uppercase text-sm">{attempt.candidateName}</strong>
+            </p>
+          </div>
+
+          <div className="border border-slate-300 rounded p-4 mb-4 font-sans text-xs space-y-1.5">
+            <div className="grid grid-cols-2 gap-2">
+              <div>Bộ phận công tác: <strong>{attempt.unitName}</strong></div>
+              <div>Bậc sát hạch: <strong>BẬC {attempt.level}</strong></div>
+              <div>Phòng thi: <strong>{attempt.roomCode}</strong></div>
+              <div>Mã đề thi: <strong>{attempt.examCode}</strong></div>
+              <div>Thời gian làm bài: <strong>{Math.floor(attempt.elapsedSeconds / 60)} phút</strong></div>
+              <div>Thời điểm nộp bài: <strong>{new Date().toLocaleString('vi-VN')}</strong></div>
+            </div>
+            <div className="pt-2 border-t border-slate-200 grid grid-cols-3 gap-2">
+              <div>Số câu đúng: <strong>{attempt.correct}/{attempt.total}</strong> ({attempt.percent}%)</div>
+              <div>Điểm số: <strong className="text-sm">{attempt.score}/10</strong></div>
+              <div>Xếp loại: <strong className={isPassed ? 'text-emerald-700' : 'text-rose-700'}>{isPassed ? 'ĐẠT' : 'KHÔNG ĐẠT'}</strong></div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 text-center font-bold text-xs pt-8 border-t border-slate-300 font-sans">
+            <div>
+              <p>THƯ KÝ HỘI ĐỒNG</p>
+              <p className="text-[10px] font-normal italic text-slate-500 mt-0.5">(Ký và ghi rõ họ tên)</p>
+              <div className="h-16"></div>
+              <p>{orgConfig.councilSecretary}</p>
+            </div>
+            <div>
+              <p>CHỦ TỊCH HỘI ĐỒNG</p>
+              <p className="text-[10px] font-normal italic text-slate-500 mt-0.5">(Ký, đóng dấu và ghi rõ họ tên)</p>
+              <div className="h-16"></div>
+              <p>{orgConfig.councilPresident}</p>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Certificate Modal */}
+      {showCertificateModal && (
+        <CertificateModal
+          attempt={attempt}
+          orgConfig={orgConfig}
+          onClose={() => setShowCertificateModal(false)}
+        />
+      )}
     </div>
   );
 };

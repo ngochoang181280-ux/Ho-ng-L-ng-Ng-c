@@ -12,7 +12,7 @@ import {
   DEFAULT_DEPARTMENTS, INITIAL_ROOMS, INITIAL_CANDIDATES, INITIAL_QUESTIONS,
   getQuestionGroupKey
 } from './data/mockData';
-import { generateExamForRoom } from './utils/questionMeta';
+import { generateExamForRoom, generateExamWithValidation } from './utils/questionMeta';
 import { ExamRoom, Candidate, Question, ExamAttempt, DepartmentInfo } from './types/exam';
 import { Lock, Key, X, AlertCircle } from 'lucide-react';
 
@@ -39,16 +39,101 @@ export default function App() {
     }
   });
 
+  // Lọc sạch câu hỏi mặc định theo yêu cầu người dùng: chỉ giữ lại câu hỏi do người dùng nhập/tải lên
   const [questions, setQuestions] = useState<Question[]>(() => {
     try {
       const saved = localStorage.getItem('spmo_questions_v9');
-      return saved ? JSON.parse(saved) : INITIAL_QUESTIONS;
+      if (saved) {
+        const parsed: Question[] = JSON.parse(saved);
+        const userOnly = parsed
+          .filter((q) => {
+            if (!q || !q.id) return false;
+            const isMock = 
+              q.id.startsWith('q-at-') ||
+              q.id.startsWith('q-qt-') ||
+              q.id.startsWith('q-nq-') ||
+              q.id.startsWith('q-ttd-') ||
+              q.id.startsWith('q-ax-') ||
+              q.id.startsWith('mock-') ||
+              q.id.startsWith('default-');
+            return !isMock;
+          })
+          .map((q) => {
+            let cit = (q.citation || '').trim();
+            let text = (q.question || '').trim();
+            // Loại bỏ các câu chữ quy chuẩn mặc định cũ nếu có
+            if (
+              cit.includes('Quy chuẩn Kỹ thuật Nghề nghiệp & Tiêu chuẩn Vận hành SPMO') ||
+              cit === 'Quy chuẩn ngành điện' ||
+              cit.includes('Căn cứ Quy chuẩn kỹ thuật an toàn điện & Quy trình vận hành SPMO')
+            ) {
+              cit = '';
+            }
+
+            // Tách trích dẫn nếu bị dính trong nội dung câu hỏi
+            if (!cit && text) {
+              const sepMatch = text.match(
+                /(?:[|–—/]|(?:\s+-\s+)|\.\s+|\,\s+|\(\s*|\[\s*)\s*(?:[-*•\s]*)(?:\[\s*|\(\s*)?(?:Phần\s*)?(?:Giải\s*thích\s*(?:và|&|\/|-)?\s*trích\s*dẫn|Trích\s*dẫn\s*(?:và|&|\/|-)?\s*giải\s*thích|Giải\s*thích\s*trích\s*dẫn|Trích\s*dẫn(?:\s*(?:đáp\s*án|tài\s*liệu|căn\s*cứ|câu\s*hỏi))?|Giải\s*thích(?:\s*(?:chi\s*tiết|đáp\s*án|nghiệp\s*vụ|chuyên\s*môn))?|Căn\s*cứ(?:\s*(?:quy\s*trình|quy\s*chuẩn|tài\s*liệu|pháp\s*lý))?|Hướng\s*dẫn(?:\s*giải)?|Tài\s*liệu(?:\s*(?:tham\s*khảo|trích\s*dẫn))?|Tham\s*khảo|Ghi\s*chú|Nguồn(?:\s*trích)?)(?:\s*\]|\s*\))?\s*[:\-,\.]?\s*(.*)$/i
+              );
+              if (sepMatch && sepMatch[1]) {
+                cit = sepMatch[1].replace(/[\)\]]+$/, '').trim();
+                text = text.substring(0, sepMatch.index).trim();
+              } else {
+                const parenMatch = text.match(/\s*[\(\[]\s*(\*?[A-ZĐÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠƯ].{10,})\s*[\)\]]$/);
+                if (parenMatch && parenMatch[1]) {
+                  cit = parenMatch[1].replace(/^\*|\*$/g, '').trim();
+                  text = text.substring(0, parenMatch.index).trim();
+                }
+              }
+            }
+
+            // Tách trích dẫn nếu bị dính ở option cuối
+            let opts = { ...(q.options || {}) };
+            if (!cit && opts) {
+              const optKeys = Object.keys(opts);
+              const lastKey = optKeys[optKeys.length - 1];
+              if (lastKey && opts[lastKey]) {
+                const optText = opts[lastKey];
+                const optSep = optText.match(
+                  /(?:[|–—/]|(?:\s+-\s+)|\.\s+|\,\s+|\(\s*|\[\s*)\s*(?:[-*•\s]*)(?:\[\s*|\(\s*)?(?:Phần\s*)?(?:Giải\s*thích\s*(?:và|&|\/|-)?\s*trích\s*dẫn|Trích\s*dẫn\s*(?:và|&|\/|-)?\s*giải\s*thích|Giải\s*thích\s*trích\s*dẫn|Trích\s*dẫn|Giải\s*thích|Căn\s*cứ)(?:[^:\-,\.]*)(?:\s*\]|\s*\))?\s*[:\-,\.]?\s*(.*)$/i
+                );
+                if (optSep && optSep[1]) {
+                  cit = optSep[1].replace(/[\)\]]+$/, '').trim();
+                  opts[lastKey] = optText.substring(0, optSep.index).trim();
+                }
+              }
+            }
+
+            return { ...q, question: text, options: opts, citation: cit };
+          });
+        return userOnly;
+      }
+      return [];
     } catch {
-      return INITIAL_QUESTIONS;
+      return [];
     }
   });
 
-  const [departments] = useState<DepartmentInfo[]>(DEFAULT_DEPARTMENTS);
+  const [departments, setDepartments] = useState<DepartmentInfo[]>(() => {
+    try {
+      const saved = localStorage.getItem('spmo_departments_v9');
+      if (saved) {
+        const parsed: DepartmentInfo[] = JSON.parse(saved);
+        // Ensure default codes A, B, C, D have user's updated standard names
+        const updated = parsed.map((d) => {
+          if (d.code === 'A' && d.name.includes('Công nhân')) return { ...d, name: 'Trưởng ca' };
+          if (d.code === 'B' && d.name.includes('XSC cơ')) return { ...d, name: 'Điều hành viên' };
+          if (d.code === 'C' && d.name.includes('Trưởng ca')) return { ...d, name: 'Công nhân điện' };
+          if (d.code === 'D' && d.name.includes('XSC điện')) return { ...d, name: 'Công nhân cơ' };
+          return d;
+        });
+        return updated;
+      }
+      return DEFAULT_DEPARTMENTS;
+    } catch {
+      return DEFAULT_DEPARTMENTS;
+    }
+  });
 
   // Active Exam Session Data
   const [activeSession, setActiveSession] = useState<{
@@ -60,6 +145,8 @@ export default function App() {
     examCode: string;
     questions: Question[];
     mode: 'official' | 'training';
+    matrixWarnings?: string[];
+    matrixTargetTotal?: number;
   } | null>(null);
 
   // Active Attempt for Result View
@@ -96,6 +183,14 @@ export default function App() {
     }
   }, [questions]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('spmo_departments_v9', JSON.stringify(departments));
+    } catch (e) {
+      console.warn('LocalStorage save error for departments', e);
+    }
+  }, [departments]);
+
   // Start exam from Candidate Portal
   const handleStartExam = (
     candidateName: string,
@@ -105,10 +200,19 @@ export default function App() {
     room: ExamRoom,
     mode: 'official' | 'training'
   ) => {
-    // Sinh đề thi chính xác theo bộ phận của phòng thi, bậc thi và ma trận phân bổ
-    const selectedQuestions = generateExamForRoom(room, questions);
+    // Sử dụng mã đề riêng do Admin đặt cho phòng thi (nếu có), nếu không tự sinh ngẫu nhiên
+    const customCode = room.customExamCode && room.customExamCode.trim();
+    const examCode = customCode || `${unit}${Math.floor(100 + Math.random() * 900)}`;
 
-    const examCode = `${unit}${Math.floor(100 + Math.random() * 900)}`;
+    // Sinh đề thi chính xác theo bộ phận của phòng thi, bậc thi của thí sinh và ma trận phân bổ:
+    // - Nhóm AX bắt buộc sắp xếp theo thứ tự từ thấp đến cao (bậc thấp đến bậc cao)
+    // - Tự động trộn các phương án đáp án A/B/C/D bảo toàn đúng đáp án correct
+    // - Nhóm TTD luôn đưa ra sau cùng
+    const examResult = generateExamWithValidation(room, questions, level, {
+      shuffleOptions: true,
+      candidateSeed: `${candidateName}_${room.roomCode}_${examCode}`,
+    });
+    const selectedQuestions = examResult.questions;
 
     // Add or update candidate in roster
     const newCand: Candidate = {
@@ -135,6 +239,8 @@ export default function App() {
       examCode,
       questions: selectedQuestions,
       mode,
+      matrixWarnings: examResult.warnings,
+      matrixTargetTotal: examResult.matrixRequestedTotal,
     });
 
     setView('candidate_exam');
@@ -143,6 +249,16 @@ export default function App() {
   // Exam finished callback
   const handleFinishExam = (attempt: ExamAttempt) => {
     setLatestAttempt(attempt);
+
+    // Lưu vào lịch sử bài thi (phục vụ Item Analysis & Analytics)
+    try {
+      const raw = localStorage.getItem('spmo_all_attempts_v9');
+      const list: ExamAttempt[] = raw ? JSON.parse(raw) : [];
+      const updatedList = [attempt, ...list.filter((a) => a.id !== attempt.id)].slice(0, 500);
+      localStorage.setItem('spmo_all_attempts_v9', JSON.stringify(updatedList));
+    } catch (e) {
+      console.warn('Lỗi lưu lịch sử thi', e);
+    }
 
     // Update candidate status in roster or add if new
     setCandidates((prev) => {
@@ -204,7 +320,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       {/* View 1: Candidate Portal */}
       {view === 'candidate_portal' && (
         <CandidatePortal
@@ -227,6 +343,8 @@ export default function App() {
           examCode={activeSession.examCode}
           questions={activeSession.questions}
           mode={activeSession.mode}
+          matrixWarnings={activeSession.matrixWarnings}
+          matrixTargetTotal={activeSession.matrixTargetTotal}
           onFinishExam={handleFinishExam}
           onExit={() => setView('candidate_portal')}
         />
@@ -251,16 +369,17 @@ export default function App() {
           onUpdateRooms={setRooms}
           onUpdateCandidates={setCandidates}
           onUpdateQuestions={setQuestions}
+          onUpdateDepartments={setDepartments}
           onBackToHome={() => setView('candidate_portal')}
         />
       )}
 
       {/* Admin Login Dialog */}
       {showAdminLoginModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
           <form
             onSubmit={handleAdminLogin}
-            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 sm:p-7 shadow-2xl relative animate-scaleUp"
+            className="bg-white border border-slate-200 rounded-3xl max-w-sm w-full p-6 sm:p-7 shadow-2xl relative animate-scaleUp"
           >
             <button
               type="button"
@@ -268,22 +387,22 @@ export default function App() {
                 setShowAdminLoginModal(false);
                 setAdminLoginError('');
               }}
-              className="absolute top-5 right-5 p-1 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
+              className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="w-12 h-12 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-4 shadow-lg shadow-cyan-500/20">
+            <div className="w-12 h-12 rounded-2xl bg-sky-100 border border-sky-300 flex items-center justify-center text-sky-600 mb-4 shadow-md shadow-sky-500/10">
               <Key className="w-6 h-6" />
             </div>
 
-            <h3 className="text-xl font-black text-slate-100 mb-1">Đăng Nhập Admin</h3>
-            <p className="text-xs text-slate-400 mb-5">
-              Quyền quản trị viên: Thiết lập phòng thi, khóa đề & giám sát
+            <h3 className="text-xl font-black text-slate-900 mb-1">Đăng Nhập Admin</h3>
+            <p className="text-xs text-slate-500 mb-5">
+              Quyền quản trị viên: Thiết lập phòng thi, ma trận & ngân hàng câu hỏi
             </p>
 
             {adminLoginError && (
-              <div className="mb-4 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-1.5">
+              <div className="mb-4 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{adminLoginError}</span>
               </div>
@@ -291,7 +410,7 @@ export default function App() {
 
             <div className="space-y-3 text-xs sm:text-sm">
               <div>
-                <label className="block text-slate-400 font-bold mb-1">Tên đăng nhập:</label>
+                <label className="block text-slate-700 font-bold mb-1">Tên đăng nhập:</label>
                 <input
                   type="text"
                   required
@@ -299,19 +418,19 @@ export default function App() {
                   placeholder="admin"
                   value={adminUsername}
                   onChange={(e) => setAdminUsername(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-slate-700/80 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 font-bold mb-1">Mật khẩu:</label>
+                <label className="block text-slate-700 font-bold mb-1">Mật khẩu:</label>
                 <input
                   type="password"
                   required
                   placeholder="••••••••"
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-slate-700/80 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
                 />
               </div>
             </div>
@@ -319,12 +438,12 @@ export default function App() {
             <div className="mt-6 flex flex-col gap-2">
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/25 active:scale-98 transition-all"
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-500 hover:to-blue-600 text-white font-bold text-sm shadow-lg shadow-sky-600/25 active:scale-98 transition-all cursor-pointer"
               >
                 Xác Thực & Vào Quản Trị
               </button>
-              <p className="text-[11px] text-slate-400 text-center mt-1">
-                Tài khoản mặc định: <span className="text-slate-300 font-mono">admin</span> / <span className="text-slate-300 font-mono">admin</span>
+              <p className="text-[11px] text-slate-500 text-center mt-1">
+                Tài khoản mặc định: <span className="text-slate-800 font-mono font-bold">admin</span> / <span className="text-slate-800 font-mono font-bold">admin</span>
               </p>
             </div>
           </form>

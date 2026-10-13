@@ -1,17 +1,17 @@
 import { Question, ExamRoom, Candidate, DepartmentInfo } from '../types/exam';
 
 export const DEFAULT_DEPARTMENTS: DepartmentInfo[] = [
-  { code: 'A', name: 'Công nhân vận hành' },
-  { code: 'B', name: 'XSC cơ (Xưởng sửa chữa cơ khí)' },
-  { code: 'C', name: 'Trưởng ca vận hành trạm & NMĐ' },
-  { code: 'D', name: 'XSC điện (Xưởng sửa chữa thiết bị điện)' },
+  { code: 'A', name: 'Trưởng ca' },
+  { code: 'B', name: 'Điều hành viên' },
+  { code: 'C', name: 'Công nhân điện' },
+  { code: 'D', name: 'Công nhân cơ' },
 ];
 
 export const INITIAL_ROOMS: ExamRoom[] = [
   {
     id: 'room-1',
     roomCode: 'SPM-2026',
-    roomName: 'Kỳ Thi Nâng Bậc Nghề Đợt 1 - 2026 (Công Nhân Vận Hành)',
+    roomName: 'Kỳ Thi Nâng Bậc Nghề Đợt 1 - 2026 (Trưởng Ca)',
     isLocked: true,
     accessPin: '8899',
     unit: 'A',
@@ -28,7 +28,7 @@ export const INITIAL_ROOMS: ExamRoom[] = [
     activeCandidatesCount: 12,
     status: 'active',
     createdAt: '2026-03-15T08:00:00Z',
-    description: 'Phòng thi chính thức nâng bậc thợ bậc 5 - Bốc câu hỏi tích lũy từ bậc 1 đến bậc 5 của Công nhân vận hành.',
+    description: 'Phòng thi chính thức nâng bậc thợ bậc 5 - Bốc câu hỏi tích lũy từ bậc 1 đến bậc 5 của nhóm Trưởng ca.',
   },
   {
     id: 'room-2',
@@ -36,7 +36,7 @@ export const INITIAL_ROOMS: ExamRoom[] = [
     roomName: 'Sát Hạch An Toàn Điện Quý 1',
     isLocked: false,
     accessPin: '1234',
-    unit: 'C',
+    unit: 'B',
     level: '6',
     examTimeMinutes: 45,
     totalQuestions: 40,
@@ -55,7 +55,7 @@ export const INITIAL_ROOMS: ExamRoom[] = [
   {
     id: 'room-3',
     roomCode: 'LUYEN-01',
-    roomName: 'Phòng Luyện Thi Bậc 4 - Công Nhân Vận Hành',
+    roomName: 'Phòng Luyện Thi Bậc 4 - Trưởng Ca',
     isLocked: false,
     accessPin: '',
     unit: 'A',
@@ -71,15 +71,15 @@ export const INITIAL_ROOMS: ExamRoom[] = [
     activeCandidatesCount: 5,
     status: 'active',
     createdAt: '2026-03-01T09:00:00Z',
-    description: 'Phòng mở tự do không cần mã khoá, lấy câu hỏi từ bậc 1 đến bậc 4 của Công nhân vận hành.',
+    description: 'Phòng mở tự do không cần mã khoá, lấy câu hỏi từ bậc 1 đến bậc 4 của nhóm Trưởng ca.',
   },
   {
     id: 'room-4',
-    roomCode: 'VH-B3',
-    roomName: 'Thi Sát Hạch Bậc 3 - Vận Hành Thiết Bị',
+    roomCode: 'DHV-B3',
+    roomName: 'Thi Sát Hạch Bậc 3 - Điều Hành Viên',
     isLocked: true,
     accessPin: '3333',
-    unit: 'A',
+    unit: 'B',
     level: '3',
     examTimeMinutes: 40,
     totalQuestions: 30,
@@ -92,7 +92,7 @@ export const INITIAL_ROOMS: ExamRoom[] = [
     activeCandidatesCount: 4,
     status: 'active',
     createdAt: '2026-03-22T08:00:00Z',
-    description: 'Sát hạch chuyên môn Bậc 3: Tích lũy kiến thức Bậc 1, Bậc 2 và Bậc 3.',
+    description: 'Sát hạch chuyên môn Bậc 3: Tích lũy kiến thức Bậc 1, Bậc 2 và Bậc 3 nhóm Điều hành viên.',
   },
 ];
 
@@ -178,7 +178,11 @@ export const INITIAL_CANDIDATES: Candidate[] = [
   },
 ];
 
-export const INITIAL_QUESTIONS: Question[] = [
+// Mặc định làm sạch câu hỏi mẫu theo yêu cầu: chỉ lưu câu hỏi do người dùng nhập vào hệ thống
+export const INITIAL_QUESTIONS: Question[] = [];
+
+// Bộ câu hỏi mẫu EVN minh họa để tham khảo hoặc nạp lại khi cần
+export const SAMPLE_EVN_QUESTIONS: Question[] = [
   // Phần AT (Mức I - An toàn điện & BHLĐ)
   {
     id: 'q-at-1',
@@ -1443,13 +1447,15 @@ export const GROUP_DEFINITIONS = [
 
 /**
  * Phân loại câu hỏi vào một trong các nhóm chuẩn: AT, QT, NQ, TTD, AX hoặc giữ nguyên mã riêng
+ * ĐẶC BIỆT: Nhóm TTD bao gồm TTD, ATTDX.n, BTTDX.n, CTTDX.n, DD... được nhận diện chính xác
  */
 export function getQuestionGroupKey(q: Question): string {
   const s = (q.section || '').toUpperCase().trim();
-  if (s === 'AT' || s.startsWith('AT')) return 'at';
+  // Ưu tiên kiểm tra TTD trước (để không bị nhầm ATTD vào AT hoặc BTTD vào B/AX)
+  if (s.includes('TTD') || s.startsWith('TTD') || s.startsWith('DD')) return 'ttd';
+  if (s === 'AT' || (s.startsWith('AT') && !s.includes('TTD'))) return 'at';
   if (s === 'QT' || s.startsWith('QT')) return 'qt';
   if (s === 'NQ' || s.startsWith('NQ')) return 'nq';
-  if (s === 'TTD' || s.startsWith('TTD') || s.startsWith('DD')) return 'ttd';
-  if (s === 'AX' || /^[A-D]\d/.test(s)) return 'ax';
+  if (s === 'AX' || /^[A-Za-z]+\d/.test(s)) return 'ax';
   return s ? s.toLowerCase() : 'ax';
 }

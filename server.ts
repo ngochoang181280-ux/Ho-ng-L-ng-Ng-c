@@ -40,6 +40,39 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Download User Guide as Word Document (.doc)
+app.get('/api/docs/user-guide.doc', async (req, res) => {
+  try {
+    const { generateUserGuideDocHtml } = await import('./src/utils/userGuideExport.js');
+    const contentHtml = generateUserGuideDocHtml();
+    const fullDocumentHtml = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office'
+            xmlns:w='urn:schemas-microsoft-com:office:word'
+            xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <meta charset='utf-8'>
+        <title>HƯỚNG DẪN SỬ DỤNG HỆ THỐNG SÁT HẠCH EVN</title>
+        <style>
+          @page { size: A4 portrait; margin: 20mm 15mm 20mm 20mm; }
+          body { font-family: 'Times New Roman', Times, serif; font-size: 13pt; line-height: 1.4; color: #000; }
+          table { width: 100%; border-collapse: collapse; margin: 10pt 0; }
+          th, td { border: 1px solid #000; padding: 5pt 7pt; font-size: 11pt; }
+        </style>
+      </head>
+      <body>
+        ${contentHtml}
+      </body>
+      </html>
+    `;
+    res.setHeader('Content-Type', 'application/msword; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="Huong_Dan_Su_Dung_He_Thong_Sat_Hach_EVN.doc"');
+    res.send('\ufeff' + fullDocumentHtml);
+  } catch (error) {
+    console.error('Error serving user guide doc:', error);
+    res.status(500).send('Không thể tạo file Word hướng dẫn sử dụng lúc này.');
+  }
+});
+
 // AI Explanation endpoint for candidates & teachers
 app.post('/api/ai/explain', async (req, res) => {
   try {
