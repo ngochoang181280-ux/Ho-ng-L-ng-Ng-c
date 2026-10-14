@@ -31,6 +31,7 @@ interface AdminPortalProps {
   onUpdateRooms: (rooms: ExamRoom[]) => void;
   onUpdateCandidates: (candidates: Candidate[]) => void;
   onUpdateQuestions: (questions: Question[]) => void;
+  onUpdateDepartments?: (departments: DepartmentInfo[]) => void;
   onBackToHome: () => void;
 }
 
@@ -42,6 +43,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onUpdateRooms,
   onUpdateCandidates,
   onUpdateQuestions,
+  onUpdateDepartments,
   onBackToHome,
 }) => {
   const [activeTab, setActiveTab] = useState<'rooms' | 'candidates' | 'questions' | 'matrix' | 'ai_gen'>('rooms');
